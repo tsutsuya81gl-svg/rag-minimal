@@ -1,0 +1,4 @@
+RAGとは、Retrieval-Augmented Generationの略です。
+外部データを検索して、その情報を元にAIが回答する仕組みです。
+
+RAGを使うことで、AIのハルシネーションを減らすことができます。
