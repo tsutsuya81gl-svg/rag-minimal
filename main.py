@@ -5,7 +5,11 @@ from langchain.vectorstores import FAISS
 from langchain.chat_models import ChatOpenAI
 
 # APIキー設定
-os.environ["OPENAI_API_KEY"] = "YOUR_API_KEY"
+import os
+api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    raise ValueError("APIキーが設定されていません")
 
 # 1. テキスト読み込み
 with open("data.txt", "r", encoding="utf-8") as f:
