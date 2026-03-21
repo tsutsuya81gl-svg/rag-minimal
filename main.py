@@ -1,59 +1,101 @@
+# main.py
+
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain.schema import Document
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import os
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
-from langchain.chat_models import ChatOpenAI
 
-# APIキー設定
-import os
-api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
-    raise ValueError("APIキーが設定されていません")
-
-# 1. テキスト読み込み
-with open("data.txt", "r", encoding="utf-8") as f:
-    text = f.read()
-
-# 2. 分割
-splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=50)
-docs = splitter.split_text(text)
-
-# 3. ベクトル化
-embeddings = OpenAIEmbeddings()
-
-# 4. DB作成
-db = FAISS.from_texts(docs, embeddings)
-
-# 5. 質問ループ
-llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-
-while True:
-    query = input("質問: ")
-    if query == "exit":
-        break
-
-    # 6. 検索
-    docs = db.similarity_search(query, k=3)
-
-    context = "\n\n".join(docs)
-
-    # 7. 回答生成
-    prompt = f"""
-あなたは正確に答えるアシスタントです。
-
-【ルール】
-- 必ず以下の情報だけを使う
-- 情報にないことは「わかりません」と答える
-- 推測は禁止
-- できるだけ具体的に答える
-
-【情報】
-{context}
-
-【質問】
-{query}
+# ===== ① テキスト =====
+text = """
+LangChainはLLMアプリ開発のためのフレームワークです。
+RAGは外部データを使って回答精度を上げる仕組みです。
+RAGでは検索した情報をもとに回答を生成します。
 """
 
-    response = llm.predict(prompt)
-    print("回答:", response)
+# ===== ② 分割 =====
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=120,
+    chunk_overlap=20
+)
+texts = splitter.split_text(text)
+docs = [Document(page_content=t) for t in texts]
+
+# ===== ③ Embedding =====
+embeddings = HuggingFaceEmbeddings(
+    model_name="intfloat/multilingual-e5-base"
+)
+
+# ===== ④ DB =====
+DB_PATH = "faiss_db"
+
+if os.path.exists(DB_PATH):
+    print("⇒ 既存DB読み込み")
+    db = FAISS.load_local(DB_PATH, embeddings)
+else:
+    print("⇒ 新規DB作成")
+    db = FAISS.from_documents(docs, embeddings)
+    db.save_local(DB_PATH)
+
+# ===== ⑤ 検索 =====
+query = "RAGとは？"
+
+retrieved_docs = db.similarity_search(query, k=3)
+
+print("\n===== 取得データ =====")
+for doc in retrieved_docs:
+    print(doc.page_content)
+
+# ===== ⑥ 抽出（修正版）=====
+
+# ★ 文単位に分割
+sentences = []
+for doc in retrieved_docs:
+    sentences.extend(doc.page_content.split("。"))
+
+sentences = [s + "。" for s in sentences if s]
+
+# ★ 抽出
+selected = ""
+for s in sentences:
+    if "RAGは" in s:
+        selected = s
+        break
+
+if selected == "":
+    selected = sentences[0]
+
+print("\n===== 抽出結果 =====")
+print(selected)
+
+# ===== ⑦ LLM（整形専用）=====
+model_name = "google/flan-t5-base"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+prompt = f"""
+次の文章をそのまま出力してください。
+
+{selected}
+
+出力:
+"""
+
+inputs = tokenizer(prompt, return_tensors="pt")
+
+outputs = model.generate(
+    **inputs,
+    max_new_tokens=50,
+    do_sample=False
+)
+
+answer = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+if answer == "":
+    answer = selected
+
+# ===== ⑧ 出力 =====
+print("\n===== 最終回答 =====")
+print(answer)
